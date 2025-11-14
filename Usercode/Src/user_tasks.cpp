@@ -1,28 +1,55 @@
-//
-// Created by Fish on 2025/11/1.
-//
-
 #include "../Inc/user_tasks.h"
 #include "main.h"
 #include "FreeRTOS.h"
 #include "cmsis_os2.h"
+#include "IMU.h"
 
-uint32_t  count = 0;
+// 外部数组先定义好
+static const float R_imu[3][3] = {
+    {1.0f, 0.0f, 0.0f},
+    {0.0f, 1.0f, 0.0f},
+    {0.0f, 0.0f, 1.0f}
+};
 
-[[noreturn]] void test_task(void*) {
+static const float gyro_bias[3] = {0.0f, 0.0f, 0.0f};
+
+// 全局 IMU 对象
+IMU imu(0.001f, 0.5f, 0.1f, R_imu, gyro_bias);
+
+[[noreturn]] void control_task(void*) {
     while (true) {
         const auto tick = osKernelGetTickCount();
-        ++count;
+        // 这里写你的控制逻辑
         osDelayUntil(tick + 1);
     }
 }
 
-osThreadId_t test_task_handle;
-constexpr osThreadAttr_t test_task_attributes = {
-    .name = "test_task",
+[[noreturn]] void imu_task(void*) {
+    while (true) {
+        const auto tick = osKernelGetTickCount();
+        imu.readSensor();
+        imu.update();
+        osDelayUntil(tick + 1);
+    }
+}
+
+// 任务属性
+osThreadId_t imu_task_handle;
+constexpr osThreadAttr_t imu_task_attributes = {
+    .name = "imu_task",
     .stack_size = 128 * 4,
-    .priority = (osPriorityNormal),
+    .priority = osPriorityNormal,
 };
+
+osThreadId_t control_task_handle;
+constexpr osThreadAttr_t control_task_attributes = {
+    .name = "control_task",
+    .stack_size = 128 * 4,
+    .priority = osPriorityAboveNormal,
+};
+
+// 创建任务
 void user_tasks_init() {
-    test_task_handle = osThreadNew(test_task, nullptr, &test_task_attributes);
+    control_task_handle = osThreadNew(control_task, nullptr, &control_task_attributes);
+    imu_task_handle = osThreadNew(imu_task, nullptr, &imu_task_attributes);
 }
