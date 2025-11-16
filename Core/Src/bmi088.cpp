@@ -97,7 +97,3 @@ void bmi088_init() {
         BMI088_ACCEL_NS_H();
 }
 
-
-
-
-

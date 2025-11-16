@@ -1,13 +1,16 @@
 #include "mahony.h"
 #include "matrix.h"
 
+#include <cstring> // std::memcpy
+#include <cmath>   // std::fabs, std::sqrt
+
 // Mahony algorithm, sensor data fusion, update quaternion
 // Mahony算法，传感器数据融合，四元数更新
 void Mahony::update(float q[4], float ws[3], float as[3]) {
   // Update sensor data
-  memcpy(q_, q, 4 * sizeof(float));
-  memcpy(ws_, ws, 3 * sizeof(float));
-  memcpy(as_, as, 3 * sizeof(float));
+  std::memcpy(q_, q, 4 * sizeof(float));
+  std::memcpy(ws_, ws, 3 * sizeof(float));
+  std::memcpy(as_, as, 3 * sizeof(float));
 
   // Calculate rotate matrix
   R_[0][0] = 1 - 2.f * (q_[2] * q_[2] + q_[3] * q_[3]);
@@ -29,7 +32,7 @@ void Mahony::update(float q[4], float ws[3], float as[3]) {
   Vector3fCross(as_, _gs_, ea_);
 
   // wu(update)=ws+kg*eg
-  if (fabs(Vector3fNorm(as_) - gravity_accel) < g_thres_) {
+  if (std::fabs(Vector3fNorm(as_) - gravity_accel) < g_thres_) {
     for (int i = 0; i < 3; i++) {
       we_[i] = kg_ * ea_[i];
     }
@@ -52,5 +55,5 @@ void Mahony::update(float q[4], float ws[3], float as[3]) {
     q_[i] += dq_[i];
   }
   Vector4fUnit(q_, q_);
-  memcpy(q, q_, 4 * sizeof(float));
+  std::memcpy(q, q_, 4 * sizeof(float));
 }

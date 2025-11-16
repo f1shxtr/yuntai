@@ -607,6 +607,26 @@
               <FileType>8</FileType>
               <FilePath>..\Core\Src\matrix.cpp</FilePath>
             </File>
+            <File>
+              <FileName>imu.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Core\Inc\imu.h</FilePath>
+            </File>
+            <File>
+              <FileName>bmi088.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Core\Inc\bmi088.h</FilePath>
+            </File>
+            <File>
+              <FileName>matrix.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Core\Inc\matrix.h</FilePath>
+            </File>
+            <File>
+              <FileName>mahony.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Core\Inc\mahony.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
