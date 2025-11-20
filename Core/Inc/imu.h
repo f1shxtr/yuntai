@@ -32,11 +32,12 @@ public:
   void readSensor();
   // 利用线性互补滤波算法，上一时刻姿态角，加速度与角速度更新当前姿态角
   void update(void);
-
+  void filter(float k);
 public:
   // IMU 原始数据
   ImuRawData_t raw_data_;
-
+  uint8_t rx_acc_data[6];
+  uint8_t rx_gyro_data[6];
   // IMU 换算得到的加速度与角速度
   // angular velocity(rad/s) 角速度
   float gyro_sensor_[3], gyro_world_[3];
@@ -44,7 +45,7 @@ public:
   float gyro_sensor_dps_[3], gyro_world_dps_[3];
   // acceleration(m/s^2) 加速度
   float accel_sensor_[3], accel_world_[3];
-
+  float roll,pitch,yaw;
   // 姿态解算得到的姿态角
   // 姿态角描述：euler angle 欧拉角
   EulerAngle_t euler_deg_, euler_rad_;
@@ -56,6 +57,7 @@ private:
   float R_imu_[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
   // 陀螺仪零飘补偿项
   float gyro_bias_[3];
+  float div_t = 0.001f; // 陀螺仪数据转换时间间隔(s)
   // Mahony解算
   Mahony mahony_;
 };
