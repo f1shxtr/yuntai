@@ -46,6 +46,7 @@ public:
   // acceleration(m/s^2) 加速度
   float accel_sensor_[3], accel_world_[3];
   float roll,pitch,yaw;
+  float acc_pitch_acc_,acc_roll_acc_;
   // 姿态解算得到的姿态角
   // 姿态角描述：euler angle 欧拉角
   EulerAngle_t euler_deg_, euler_rad_;

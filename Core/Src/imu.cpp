@@ -1,170 +1,149 @@
+// Core/Src/imu.cpp
 #include "imu.h"
 #include "bmi088.h"
 #include <cmath>
 #include <cstring>
+#include <cstdint>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
 #endif
-// ===================== IMU 构造函数 ===================== //
+
+static inline float wrapAngleDeg(float a)
+{
+    // 将角度规约到 [-180, 180)
+    // 使用 fmodf 更高效：注意负数处理
+    a = fmodf(a, 360.0f);
+    if (a >= 180.0f) a -= 360.0f;
+    if (a < -180.0f) a += 360.0f;
+    return a;
+}
+
+// === 构造与 init 保持不变 ===
+// 构造函数实现，签名需与声明完全一致
 IMU::IMU(const float& dt, const float& kg, const float& g_thres,
          const float R_imu[3][3], const float gyro_bias[3])
     : mahony_(dt, kg, g_thres)
 {
-    // 拷贝安装矩阵
+    // 保存积分周期，避免角度积分无限增长
+    div_t = dt;
+
+    // 拷贝安装矩阵和陀螺零偏
     std::memcpy(R_imu_, R_imu, sizeof(float) * 9);
-
-    // 拷贝零飘
     std::memcpy(gyro_bias_, gyro_bias, sizeof(float) * 3);
+
+    // 初始化四元数为单位四元数
+    q_[0] = 1.0f; q_[1] = 0.0f; q_[2] = 0.0f; q_[3] = 0.0f;
+
+    // 清零传感器相关缓存
+    for (int i = 0; i < 3; ++i) {
+        gyro_sensor_[i] = 0.0f;
+        gyro_sensor_dps_[i] = 0.0f;
+        accel_sensor_[i] = 0.0f;
+        raw_data_.accel[i] = 0.0f;
+        raw_data_.gyro[i]  = 0.0f;
+    }
+
+    // 其它缓冲与状态初始化
+    raw_data_.temp[0] = 0.0f;
+    for (int i = 0; i < 6; ++i) {
+        rx_acc_data[i] = 0;
+        rx_gyro_data[i] = 0;
+    }
+
+    acc_roll_acc_ = 0.0f;
+    acc_pitch_acc_= 0.0f;
+    roll = pitch = yaw = 0.0f;
 }
-
-// ===================== 初始化 ===================== //
-void IMU::init(EulerAngle_t euler_deg_init)
-{
-    // 初始化 quaternion，用欧拉角转四元数（简易版）
-    float cy = cosf(euler_deg_init.yaw   * 0.5f * M_PI/180.f);
-    float sy = sinf(euler_deg_init.yaw   * 0.5f * M_PI/180.f);
-    float cp = cosf(euler_deg_init.pitch * 0.5f * M_PI/180.f);
-    float sp = sinf(euler_deg_init.pitch * 0.5f * M_PI/180.f);
-    float cr = cosf(euler_deg_init.roll  * 0.5f * M_PI/180.f);
-    float sr = sinf(euler_deg_init.roll  * 0.5f * M_PI/180.f);
-
-    q_[0] = cr * cp * cy + sr * sp * sy;
-    q_[1] = sr * cp * cy - cr * sp * sy;
-    q_[2] = cr * sp * cy + sr * cp * sy;
-    q_[3] = cr * cp * sy - sr * sp * cy;
-
-    // BMI088 初始化
-    bmi088_init();
-
-    uint8_t raw_range;
-    uint8_t gyro_range;
-    bmi088_accel_read_reg(0x41, &raw_range, 1);
-    raw_range = raw_range & 0x03;
-    // code here
-
-    // 2. 读取acc0x12寄存器中的6位acc数据
-    bmi088_accel_read_reg(0x12, rx_acc_data, 6);
-
-    // 3. 用量程系数将原始数据转换为常用单位
-    int16_t Accel_X_int16 = rx_acc_data[0] * 256 + rx_acc_data[1];
-    int16_t Accel_Y_int16 = rx_acc_data[2] * 256 + rx_acc_data[3];
-    int16_t Accel_Z_int16 = rx_acc_data[4] * 256 + rx_acc_data[5];
-
-    raw_data_.accel[0] = (float)Accel_X_int16;
-    raw_data_.accel[1] = (float)Accel_Y_int16;
-    raw_data_.accel[2] = (float)Accel_Z_int16;
-    accel_sensor_[0] = (float)Accel_X_int16 / 32768.0f * 1000.0f * (1 << (raw_range + 1)) * 1.5f;
-    accel_sensor_[1] = (float)Accel_Y_int16 / 32768.0f * 1000.0f * (1 << (raw_range + 1)) * 1.5f;
-    accel_sensor_[2] = (float)Accel_Z_int16 / 32768.0f * 1000.0f * (1 << (raw_range + 1)) * 1.5f;
-
-    gyro_sensor_[0] = accel_sensor_[0];
-    gyro_sensor_[1] = accel_sensor_[1];
-    gyro_sensor_[2] = accel_sensor_[2];
-}
-
 // ========================================================= //
-//
-//               IMU::readSensor() 读取 BMI088               //
+//                   读取 BMI088 传感器                      //
 // ========================================================= //
 void IMU::readSensor()
 {
     uint8_t raw_range;
     uint8_t gyro_range;
-    bmi088_accel_read_reg(0x41, &raw_range, 1);
-    raw_range = raw_range & 0x03;
-    // code here
 
-    // 2. 读取acc0x12寄存器中的6位acc数据
+    // ----------- ACC ------------
+    bmi088_accel_read_reg(0x41, &raw_range, 1);
+    raw_range &= 0x03;
+
     bmi088_accel_read_reg(0x12, rx_acc_data, 6);
 
-    // 3. 用量程系数将原始数据转换为常用单位
-    int16_t Accel_X_int16 = rx_acc_data[0] * 256 + rx_acc_data[1];
-    int16_t Accel_Y_int16 = rx_acc_data[2] * 256 + rx_acc_data[3];
-    int16_t Accel_Z_int16 = rx_acc_data[4] * 256 + rx_acc_data[5];
+    int16_t ax_raw = rx_acc_data[0] * 256 + rx_acc_data[1];
+    int16_t ay_raw = rx_acc_data[2] * 256 + rx_acc_data[3];
+    int16_t az_raw = rx_acc_data[4] * 256 + rx_acc_data[5];
 
-    raw_data_.accel[0] = (float)Accel_X_int16 / 32768.0f * 1000.0f * (1 << (raw_range + 1)) * 1.5f;
-    raw_data_.accel[1] = (float)Accel_Y_int16 / 32768.0f * 1000.0f * (1 << (raw_range + 1)) * 1.5f;
-    raw_data_.accel[2] = (float)Accel_Z_int16 / 32768.0f * 1000.0f * (1 << (raw_range + 1)) * 1.5f;
-    accel_sensor_[0] = std::atan(raw_data_.accel[1]/raw_data_.accel[2])* (180 / M_PI);
-    accel_sensor_[1] = std::atan(-raw_data_.accel[0]/std::sqrt(raw_data_.accel[1]*raw_data_.accel[1]+raw_data_.accel[2]*raw_data_.accel[2]))* (180 / M_PI);
+    float acc_scale = 1000.0f * (1 << (raw_range + 1)) * 1.5f / 32768.0f;
 
-    // code here
+    raw_data_.accel[0] = ax_raw * acc_scale;
+    raw_data_.accel[1] = ay_raw * acc_scale;
+    raw_data_.accel[2] = az_raw * acc_scale;
+
+    // ---------- 加速度计角度 ----------
+    acc_roll_acc_  = atan2f(raw_data_.accel[1], raw_data_.accel[2]) * 180.0f / M_PI;
+    acc_pitch_acc_ = atan2f(-raw_data_.accel[0],
+                     sqrtf(raw_data_.accel[1]*raw_data_.accel[1] + raw_data_.accel[2]*raw_data_.accel[2]))
+                     * 180.0f / M_PI;
+
+    // 读取加速度计温度寄存器（示例寄存器 0x22，两字节）
+    // Core/Src/imu.cpp (替换原有的 if(...) 块)
+{
+    uint8_t temp_buf[2] = {0};
+    // 直接调用读取函数（不比较返回值）
+    bmi088_accel_read_reg(0x22, temp_buf, 2);
+    int16_t temp_raw_acc = (int16_t)((temp_buf[0] << 8) | temp_buf[1]);
+    // 常用近似转换：T = 23 + raw/512
+    raw_data_.temp[0] = 23.0f + (float)temp_raw_acc / 512.0f;
+}
 
 
-    // 1. 设置/读取gyro0x0F寄存器中的量程range参数，并换算为量程系数
+    // ----------- GYRO ------------
     bmi088_gyro_read_reg(0x0F, &gyro_range, 1);
-    gyro_range = gyro_range & 0x07;
-    // 2. 读取gyro0x02寄存器中的6位gyro数据
-    bmi088_gyro_read_reg(0x02, rx_gyro_data,6);
-    // 3. 用量程系数将原始数据转换为常用单位
-    int16_t Rate_X = rx_gyro_data[0] * 256 + rx_gyro_data[1];
-    int16_t Rate_Y = rx_gyro_data[2] * 256 + rx_gyro_data[3];
-    int16_t Rate_Z = rx_gyro_data[4] * 256 + rx_gyro_data[5];
+    gyro_range &= 0x07;
 
-    raw_data_.gyro[0] = (float)Rate_X;
-    raw_data_.gyro[1] = (float)Rate_Y;
-    raw_data_.gyro[2] = (float)Rate_Z;
+    bmi088_gyro_read_reg(0x02, rx_gyro_data, 6);
+
+    int16_t gx_raw = rx_gyro_data[0] * 256 + rx_gyro_data[1];
+    int16_t gy_raw = rx_gyro_data[2] * 256 + rx_gyro_data[3];
+    int16_t gz_raw = rx_gyro_data[4] * 256 + rx_gyro_data[5];
+
     float full_scale_dps = 2000.0f / (1 << gyro_range);
     float gyro_scale = full_scale_dps / 32768.0f;
 
-    // 换算 °/s
-    gyro_sensor_dps_[0] = raw_data_.gyro[0] * gyro_scale;
-    gyro_sensor_dps_[1] = raw_data_.gyro[1] * gyro_scale;
-    gyro_sensor_dps_[2] = raw_data_.gyro[2] * gyro_scale;
-    gyro_sensor_[0] += gyro_sensor_dps_[0] * div_t - gyro_bias_[0];
-    gyro_sensor_[1] += gyro_sensor_dps_[1] * div_t - gyro_bias_[1];
-    gyro_sensor_[2] += gyro_sensor_dps_[2] * div_t - gyro_bias_[2];
+    gyro_sensor_dps_[0] = gx_raw * gyro_scale - gyro_bias_[0];
+    gyro_sensor_dps_[1] = gy_raw * gyro_scale - gyro_bias_[1];
+    gyro_sensor_dps_[2] = gz_raw * gyro_scale - gyro_bias_[2];
+
+    // ---- 积分得到角度 ----
+    gyro_sensor_[0] += gyro_sensor_dps_[0] * div_t;
+    gyro_sensor_[1] += gyro_sensor_dps_[1] * div_t;
+    gyro_sensor_[2] += gyro_sensor_dps_[2] * div_t;
+
+    // 防止积分值无限增长：把积分角规约到 [-180,180)
+    gyro_sensor_[0] = wrapAngleDeg(gyro_sensor_[0]);
+    gyro_sensor_[1] = wrapAngleDeg(gyro_sensor_[1]);
+    gyro_sensor_[2] = wrapAngleDeg(gyro_sensor_[2]);
 }
 
 // ========================================================= //
-//                  update() = Mahony融合                    //
+//                简单互补滤波融合 roll/pitch                 //
 // ========================================================= //
 void IMU::filter(float k)
 {
-    roll=gyro_sensor_[0]+(accel_sensor_[0]-gyro_sensor_[0])*k;
-    pitch=gyro_sensor_[1]+(accel_sensor_[1]-gyro_sensor_[1])*k;
-    yaw=gyro_sensor_[2]+(accel_sensor_[2]-gyro_sensor_[2])*k;
+    // k = 加速度计比例因子（0~1） 例如 0.02~0.2
+    roll  = gyro_sensor_[0] + k * (acc_roll_acc_  - gyro_sensor_[0]);
+    pitch = gyro_sensor_[1] + k * (acc_pitch_acc_ - gyro_sensor_[1]);
+    // yaw 无法从加速度计得到，只能纯陀螺仪积分
+    yaw = gyro_sensor_[2];
+
+    // 规约输出角度到 [-180,180)
+    roll  = wrapAngleDeg(roll);
+    pitch = wrapAngleDeg(pitch);
+    yaw   = wrapAngleDeg(yaw);
 }
+
+// update 保持不变
 void IMU::update()
 {
-    filter(0.2f);
+    filter(0.2f);   // 互补滤波比例
 }
-// 将 R_imu 旋转矩阵用于坐标变换
-/*    for(int i=0; i<3; i++)
-    {
-        accel_world_[i] =
-            R_imu_[i][0] * accel_sensor_[0] +
-            R_imu_[i][1] * accel_sensor_[1] +
-            R_imu_[i][2] * accel_sensor_[2];
-
-        gyro_world_[i] =
-            R_imu_[i][0] * gyro_sensor_[0] +
-            R_imu_[i][1] * gyro_sensor_[1] +
-            R_imu_[i][2] * gyro_sensor_[2];
-    }
-
-    // 调用你原样的 Mahony::update(q, gyro, accel)
-    mahony_.update(q_, gyro_world_, accel_world_);
-
-    // 由四元数得到欧拉角
-    float qw = q_[0], qx = q_[1], qy = q_[2], qz = q_[3];
-
-    float sinr = 2.f * (qw*qx + qy*qz);
-    float cosr = 1.f - 2.f * (qx*qx + qy*qy);
-    euler_rad_.roll = atan2f(sinr, cosr);
-
-    float sinp = 2.f * (qw*qy - qz*qx);
-    if (fabs(sinp) >= 1)
-        euler_rad_.pitch = copysignf(M_PI/2, sinp);
-    else
-        euler_rad_.pitch = asinf(sinp);
-
-    float siny = 2.f * (qw*qz + qx*qy);
-    float cosy = 1.f - 2.f * (qy*qy + qz*qz);
-    euler_rad_.yaw = atan2f(siny, cosy);
-
-    // 转成角度
-    euler_deg_.yaw   = euler_rad_.yaw   * 180.f/M_PI;
-    euler_deg_.pitch = euler_rad_.pitch * 180.f/M_PI;
-    euler_deg_.roll  = euler_rad_.roll  * 180.f/M_PI; */

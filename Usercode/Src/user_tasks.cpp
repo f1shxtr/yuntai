@@ -14,7 +14,7 @@ static const float R_imu[3][3] = {
 static const float gyro_bias[3] = {0.0f, 0.0f, 0.0f};
 
 // 全局 IMU 对象
-IMU imu(0.001f, 0.5f, 0.1f, R_imu, gyro_bias);
+IMU imu(0.001f, 0.2f, 0.1f, R_imu, gyro_bias);
 
 /*[[noreturn]] void control_task(void*) {
     while (true) {
