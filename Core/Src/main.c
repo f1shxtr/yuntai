@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
+#include "can.h"
 #include "spi.h"
 #include "usart.h"
 #include "gpio.h"
@@ -58,6 +59,24 @@ void MX_FREERTOS_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+uint8_t tx_data[8];
+uint8_t rx_data[8];
+CAN_RxHeaderTypeDef rx_header;
+CAN_TxHeaderTypeDef tx_header = { .StdId = 0x200,
+                                  .ExtId = 0,
+                                  .IDE = CAN_ID_STD,
+                                  .RTR = CAN_RTR_DATA,
+                                  .DLC = 8,
+                                  .TransmitGlobalTime = DISABLE };
+CAN_FilterTypeDef filter_config = { .FilterIdHigh = 0x0000,
+                                    .FilterIdLow = 0x0000,
+                                    .FilterMaskIdHigh = 0x0000,
+                                    .FilterMaskIdLow = 0x0000,
+                                    .FilterFIFOAssignment = CAN_FILTER_FIFO0,
+                                    .FilterBank = 0,
+                                    .FilterMode = CAN_FILTERMODE_IDMASK,
+                                    .FilterScale = CAN_FILTERSCALE_32BIT,
+                                    .FilterActivation = ENABLE };
 
 /* USER CODE END 0 */
 
@@ -92,8 +111,11 @@ int main(void)
   MX_GPIO_Init();
   MX_SPI1_Init();
   MX_USART3_UART_Init();
+  MX_CAN1_Init();
   /* USER CODE BEGIN 2 */
-
+  HAL_CAN_ConfigFilter(&hcan1, &filter_config);
+  HAL_CAN_Start(&hcan1);
+  HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
   /* USER CODE END 2 */
 
   /* Init scheduler */

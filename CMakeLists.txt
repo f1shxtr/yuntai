@@ -35,6 +35,7 @@ enable_language(C ASM)
 add_executable(${CMAKE_PROJECT_NAME}
         Core/Src/bmi088.cpp
         Core/Src/imu.cpp
+        Core/Src/can_globals.c
 )
 
 # Add STM32CubeMX generated sources
@@ -48,7 +49,18 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
+    Core/Src/can_globals.c
 )
+
+# Add project-specific C/C++ sources (Core and Usercode C++ sources)
+file(GLOB_RECURSE USER_CPP_SOURCES
+    "${CMAKE_SOURCE_DIR}/Core/Src/*.cpp"
+    "${CMAKE_SOURCE_DIR}/Usercode/Src/*.cpp"
+)
+if(USER_CPP_SOURCES)
+    message(STATUS "Adding user cpp sources: ${USER_CPP_SOURCES}")
+    target_sources(${CMAKE_PROJECT_NAME} PRIVATE ${USER_CPP_SOURCES})
+endif()
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
