@@ -16,8 +16,7 @@ extern "C"{
     void motor_stop(void);
 
     // OS primitives used by user tasks (event flags and semaphores)
-    extern osSemaphoreId_t CAN_semaphore_handle;
-    extern osSemaphoreId_t Rcc_semaphore_handle;
+
     extern osEventFlagsId_t event_handle;
 
 #ifdef  __cplusplus

@@ -1,106 +1,102 @@
+// user_tasks.cpp
 #include "../Inc/user_tasks.h"
-#include "main.h"
-#include "FreeRTOS.h"
-#include "cmsis_os2.h"
 #include "IMU.h"
 #include "motor.h"
 #include "can.h"
+#include "FreeRTOS.h"
 
-// extern HAL objects used for CAN send
-extern CAN_HandleTypeDef hcan1;
+// ========= 全局（共享给 callback.cpp） =========
+volatile uint32_t can_rx_id = 0;
+volatile uint8_t can_rx_ready = 0; // ISR sets this when new message available
+volatile uint8_t can_rx_buffer[8] = {0};
+volatile uint8_t can_tx_ready = 0; // set by RX task to request TX
+volatile uint32_t can_rx_count = 0; // incremented by ISR when a message is received
+
+uint8_t tx_data[8] = {0};
 extern CAN_TxHeaderTypeDef tx_header;
-extern uint8_t tx_data[8];
-extern uint32_t* pTxMailbox;
-extern float target_angle; // ensure referenced symbol is declared
+extern CAN_HandleTypeDef hcan1;
+uint32_t* pTxMailbox;
 
-// 外部数组先定义好
+// ========= IMU 实例 =========
 static const float R_imu[3][3] = {
-    {1.0f, 0.0f, 0.0f},
-    {0.0f, 1.0f, 0.0f},
-    {0.0f, 0.0f, 1.0f}
+    {1,0,0},
+    {0,1,0},
+    {0,0,1}
 };
+static const float gyro_bias[3] = {0,0,0};
 
-static const float gyro_bias[3] = {0.0f, 0.0f, 0.0f};
-
-// 全局 IMU 对象
 IMU imu(0.001f, 0.2f, 0.1f, R_imu, gyro_bias);
 
-// CAN/Task synchronization primitives (simple flags+buffer)
-volatile uint8_t can_rx_ready = 0;
-volatile uint8_t can_rx_buffer[8] = {0};
-volatile uint8_t can_tx_ready = 0;
-volatile uint32_t can_rx_id = 0;
-
-// create two motor instances as requested
-Motor motor_pitch(1.0f, 0x208, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 4000.0f, 4000.0f, 16384.0f, 16384.0f, 0.1f, 0.0f);
-Motor motor_yaw(1.0f, 0x205, 0.0f, 0.0f, 0.0f, 210.0f, 0.0f, 0.0f, 4000.0f, 4000.0f, 16384.0f, 16384.0f, 0.1f, 0.0f);
+// ========= Motor 实例 =========
+Motor motor_pitch(1.0f, 0x208, 0,0,0, 0,0,0, 4000,4000, 16384,16384, 0.1f,0.0f);
+Motor motor_yaw  (1.0f, 0x205, 0,0,0,210,0,0,4000,4000,16384,16384,0.1f,0.0f);
 
 
-// Task attributes
-osThreadId_t can_rx_task_handle;
-constexpr osThreadAttr_t can_rx_task_attributes = {
-    .name = "can_rx_task",
-    .stack_size = 256 * 4,
-    .priority = osPriorityNormal,
-};
-
-osThreadId_t can_tx_task_handle;
-constexpr osThreadAttr_t can_tx_task_attributes = {
-    .name = "can_tx_task",
-    .stack_size = 128 * 4,
-    .priority = osPriorityLow,
-};
-
-osThreadId_t imu_task_handle;
-constexpr osThreadAttr_t imu_task_attributes = {
-    .name = "imu_task",
-    .stack_size = 512 * 4,
-    .priority = osPriorityNormal,
-};
-
-[[noreturn]] void can_rx_task(void* ) {
-
-    while (true) {
-        if (can_rx_ready) {
-            // copy buffer locally to avoid ISR race
-            uint8_t buf[8];
-            for (int i = 0; i < 8; ++i) buf[i] = can_rx_buffer[i];
-            uint32_t id = can_rx_id;
-            can_rx_ready = 0;
-
-            // dispatch to proper motor based on ID
-            if (id == 0x208) {
-                motor_pitch.can_rx_msg_callback(buf);
-                motor_pitch.handle();
-            } else if (id == 0x205) {
-                motor_yaw.can_rx_msg_callback(buf);
-                motor_yaw.handle();
-            } else {
-                // unknown id: ignore or log
-            }
-
-            // mark tx ready to be sent by tx task
-            if (can_tx_ready == 0) {
-                can_tx_ready = 1;
-            }
+// =====================================================================================
+// CAN RX Task —— 等待 CAN ISR 事件 → 调 motor → 触发 TX
+// =====================================================================================
+[[noreturn]] void can_rx_task(void*)
+{
+    while (true)
+    {
+        // polling: wait until ISR sets can_rx_ready
+        while (!can_rx_ready) {
+            osDelay(1);
         }
 
+        // copy data locally then clear flag
+        uint8_t data[8];
+        for (int i = 0; i < 8; ++i)
+            data[i] = can_rx_buffer[i];
+        uint32_t id = can_rx_id;
+        can_rx_ready = 0; // clear for next message
+
+        if (id == 0x208) {
+            motor_pitch.can_rx_msg_callback(data);
+            motor_pitch.handle();
+        }
+        else if (id == 0x205) {
+            motor_yaw.can_rx_msg_callback(data);
+            motor_yaw.handle();
+        }
+
+        // signal tx task by setting can_tx_ready
+        can_tx_ready = 1;
     }
 }
 
-[[noreturn]] void can_tx_task(void* ){
 
-    while (true) {
-            // send tx_data via HAL CAN (use existing tx_header and pTxMailbox from Core)
-            HAL_CAN_AddTxMessage(&hcan1, &tx_header, tx_data, pTxMailbox);
+// =====================================================================================
+// CAN TX Task —— 等待发送事件 → 发送 CMD
+// =====================================================================================
+[[noreturn]] void can_tx_task(void*)
+{
+    while (true)
+    {
+        // polling: wait for can_tx_ready
+        while (!can_tx_ready) {
+            osDelay(1);
         }
 
+        uint8_t local[8];
+        for (int i = 0; i < 8; ++i)
+            local[i] = tx_data[i];
+
+        can_tx_ready = 0;
+        HAL_CAN_AddTxMessage(&hcan1, &tx_header, local, pTxMailbox);
+    }
 }
 
 
-[[noreturn]] void imu_task(void* ) {
+// =====================================================================================
+// IMU Task —— 固定 1ms 更新
+// =====================================================================================
+[[noreturn]] void imu_task(void*)
+{
     TickType_t tick = osKernelGetTickCount();
-    while (true) {
+
+    while (true)
+    {
         imu.readSensor();
         imu.update();
         tick += 1;
@@ -108,19 +104,46 @@ constexpr osThreadAttr_t imu_task_attributes = {
     }
 }
 
-// 创建任务: ensure osThreadNew uses function pointers
-void user_tasks_init() {
-    can_rx_task_handle = osThreadNew(can_rx_task, NULL, &can_rx_task_attributes);
-    can_tx_task_handle = osThreadNew(can_tx_task, NULL, &can_tx_task_attributes);
-    imu_task_handle = osThreadNew(imu_task, NULL, &imu_task_attributes);
+
+// =====================================================================================
+// 任务初始化
+// =====================================================================================
+void user_tasks_init()
+{
+     // RX 任务
+     osThreadAttr_t rx_attr = {
+         .name = "can_rx",
+         .stack_size = 512,
+         .priority = osPriorityNormal
+     };
+     osThreadNew(can_rx_task, NULL, &rx_attr);
+
+    // TX 任务
+    osThreadAttr_t tx_attr = {
+        .name = "can_tx",
+        .stack_size = 512,
+        .priority = osPriorityLow
+    };
+    osThreadNew(can_tx_task, NULL, &tx_attr);
+
+    // IMU 任务
+    osThreadAttr_t imu_attr = {
+        .name = "imu",
+        .stack_size = 1024,
+        .priority = osPriorityNormal
+    };
+    osThreadNew(imu_task, NULL, &imu_attr);
 }
 
-void motor_stop(void) {
-    // stop both motors
+
+// =====================================================================================
+// Motor Stop
+// =====================================================================================
+void motor_stop()
+{
     motor_pitch.SetIntensity(0.0f);
     motor_yaw.SetIntensity(0.0f);
-    // ensure tx_data cleared for immediate send
-    tx_data[0] = 0x00;
-    tx_data[1] = 0x00;
-}
 
+    for (int i = 0; i < 8; ++i)
+        tx_data[i] = 0;
+}

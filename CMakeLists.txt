@@ -35,7 +35,6 @@ enable_language(C ASM)
 add_executable(${CMAKE_PROJECT_NAME}
         Core/Src/bmi088.cpp
         Core/Src/imu.cpp
-        Core/Src/can_globals.c
 )
 
 # Add STM32CubeMX generated sources

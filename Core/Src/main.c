@@ -20,6 +20,7 @@
 #include "main.h"
 #include "cmsis_os.h"
 #include "can.h"
+#include "dma.h"
 #include "spi.h"
 #include "usart.h"
 #include "gpio.h"
@@ -59,8 +60,7 @@ void MX_FREERTOS_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-uint8_t tx_data[8];
-uint8_t rx_data[8];
+
 CAN_RxHeaderTypeDef rx_header;
 CAN_TxHeaderTypeDef tx_header = { .StdId = 0x200,
                                   .ExtId = 0,
@@ -109,6 +109,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_SPI1_Init();
   MX_USART3_UART_Init();
   MX_CAN1_Init();
