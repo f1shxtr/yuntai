@@ -30,7 +30,10 @@ IMU imu(0.001f, 0.2f, 0.1f, R_imu, gyro_bias);
 // ========= Motor 实例 =========
 Motor motor_pitch(1.0f, 0x208, 0,0,0, 0,0,0, 4000,4000, 16384,16384, 0.1f,0.0f);
 Motor motor_yaw  (1.0f, 0x205, 0,0,0,210,0,0,4000,4000,16384,16384,0.1f,0.0f);
-
+float motor_pitch_targetspeed = 0.0f;
+float motor_yaw_targetspeed = 0.0f;
+float motor_pitch_targetangle = 0.0f;
+float motor_yaw_targetangle = 0.0f;
 
 // =====================================================================================
 // CAN RX Task —— 等待 CAN ISR 事件 → 调 motor → 触发 TX
@@ -53,10 +56,12 @@ Motor motor_yaw  (1.0f, 0x205, 0,0,0,210,0,0,4000,4000,16384,16384,0.1f,0.0f);
 
         if (id == 0x208) {
             motor_pitch.can_rx_msg_callback(data);
+            motor_pitch.SetSpeed(motor_pitch_targetspeed, 0.0f);
             motor_pitch.handle();
         }
         else if (id == 0x205) {
             motor_yaw.can_rx_msg_callback(data);
+            motor_yaw.SetSpeed(motor_yaw_targetspeed, 0.0f);
             motor_yaw.handle();
         }
 

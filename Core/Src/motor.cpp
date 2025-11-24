@@ -86,15 +86,41 @@ void Motor::handle() {
             break;
     }
     int16_t intensity = static_cast<int16_t>(output_intensity_);
-    tx_data[0] = (intensity >> 8) & 0xFF; // 高字节
-    tx_data[1] = intensity & 0xFF; // 低字节
+    switch (can_id_)
+    {
+        case 0x205:
+        {
+            tx_data[0] = (intensity >> 8) & 0xFF;
+            tx_data[1] = intensity & 0xFF;
+            break;
+        }
+        case 0x206:
+        {
+            tx_data[2] = (intensity >> 8) & 0xFF;
+            tx_data[3] = intensity & 0xFF;
+            break;
+        }
+        case 0x207:
+        {
+            tx_data[4] = (intensity >> 8) & 0xFF;
+            tx_data[5] = intensity & 0xFF;
+            break;
+        }
+        case 0x208:
+        {
+            tx_data[6] = (intensity >> 8) & 0xFF;
+            tx_data[7] = intensity & 0xFF;
+            break;
+        }
+            default:
+                break;
+    }
 }
-
 float Motor::FeedforwardIntensityCalc(float current_angle) {
     const float m = 0.5f; // kg
     const float g = 9.8f; // m/s^2
     const float L = 0.05524f; // m
-    const float Kt = 0.3f; // N·m/A
+    const float Kt = 0.741f; // N·m/A
 
     float torque = m * g * L * sinf(current_angle * 3.141592653f / 180.0f);
 

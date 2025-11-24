@@ -62,7 +62,7 @@ void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN 0 */
 
 CAN_RxHeaderTypeDef rx_header;
-CAN_TxHeaderTypeDef tx_header = { .StdId = 0x200,
+CAN_TxHeaderTypeDef tx_header = { .StdId = 0x1FE,
                                   .ExtId = 0,
                                   .IDE = CAN_ID_STD,
                                   .RTR = CAN_RTR_DATA,
