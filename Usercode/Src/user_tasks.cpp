@@ -4,13 +4,13 @@
 #include "motor.h"
 #include "can.h"
 #include "FreeRTOS.h"
-
+#include "rc.h"
 // ========= 全局（共享给 callback.cpp） =========
 volatile uint32_t can_rx_id = 0;
 volatile uint8_t can_rx_ready = 0; // ISR sets this when new message available
 volatile uint8_t can_rx_buffer[8] = {0};
 volatile uint8_t can_tx_ready = 0; // set by RX task to request TX
-volatile uint32_t can_rx_count = 0; // incremented by ISR when a message is received
+ // incremented by ISR when a message is received
 
 uint8_t tx_data[8] = {0};
 extern CAN_TxHeaderTypeDef tx_header;
@@ -26,7 +26,7 @@ static const float R_imu[3][3] = {
 static const float gyro_bias[3] = {0,0,0};
 
 IMU imu(0.001f, 0.2f, 0.1f, R_imu, gyro_bias);
-
+RC_Class rcc;
 // ========= Motor 实例 =========
 Motor motor_pitch(1.0f, 0x208, 0,0,0, 0,0,0, 4000,4000, 16384,16384, 0.1f,0.0f);
 Motor motor_yaw  (1.0f, 0x205, 0,0,0,210,0,0,4000,4000,16384,16384,0.1f,0.0f);
@@ -43,16 +43,22 @@ float motor_yaw_targetangle = 0.0f;
     while (true)
     {
         // polling: wait until ISR sets can_rx_ready
-        while (!can_rx_ready) {
-            osDelay(1);
-        }
 
         // copy data locally then clear flag
         uint8_t data[8];
         for (int i = 0; i < 8; ++i)
             data[i] = can_rx_buffer[i];
-        uint32_t id = can_rx_id;
-        can_rx_ready = 0; // clear for next message
+        uint32_t id = can_rx_id;// clear for next message
+
+        rcc.is_connected = (HAL_GetTick() - rcc.last_receive_tick <= 1000) ? 1 : 0;
+        // data_ready 可用于触发调试观察
+        if(rcc.data_ready)
+        {
+            rcc.handle();
+            rcc.data_ready = 0;
+        }
+
+        motor_yaw_targetangle = rcc.rc.ch0 * 180.0f;
 
         if (id == 0x208) {
             motor_pitch.can_rx_msg_callback(data);
@@ -64,9 +70,8 @@ float motor_yaw_targetangle = 0.0f;
             motor_yaw.SetSpeed(motor_yaw_targetspeed, 0.0f);
             motor_yaw.handle();
         }
-
         // signal tx task by setting can_tx_ready
-        can_tx_ready = 1;
+    //    can_tx_ready = 1;
     }
 }
 
@@ -79,15 +84,15 @@ float motor_yaw_targetangle = 0.0f;
     while (true)
     {
         // polling: wait for can_tx_ready
-        while (!can_tx_ready) {
+       /* while (!can_tx_ready) {
             osDelay(1);
-        }
+        }*/
 
         uint8_t local[8];
         for (int i = 0; i < 8; ++i)
             local[i] = tx_data[i];
 
-        can_tx_ready = 0;
+        //can_tx_ready = 0;
         HAL_CAN_AddTxMessage(&hcan1, &tx_header, local, pTxMailbox);
     }
 }
@@ -98,14 +103,11 @@ float motor_yaw_targetangle = 0.0f;
 // =====================================================================================
 [[noreturn]] void imu_task(void*)
 {
-    TickType_t tick = osKernelGetTickCount();
-
     while (true)
     {
         imu.readSensor();
         imu.update();
-        tick += 1;
-        osDelayUntil(tick);
+        osDelay(1);
     }
 }
 
