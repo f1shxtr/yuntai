@@ -129,7 +129,7 @@ void user_tasks_init()
     osThreadAttr_t tx_attr = {
         .name = "can_tx",
         .stack_size = 512,
-        .priority = osPriorityLow
+        .priority = osPriorityNormal
     };
     osThreadNew(can_tx_task, NULL, &tx_attr);
 
@@ -154,3 +154,4 @@ void motor_stop()
     for (int i = 0; i < 8; ++i)
         tx_data[i] = 0;
 }
+
