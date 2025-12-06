@@ -3,6 +3,7 @@
 //
 
 #include "rc.h"
+#include "../../Usercode/Inc/user_tasks.h"
 #include "usart.h"
 #include "main.h"
 #include <string.h>
@@ -71,7 +72,7 @@ void RC_Class::parse() {
     switch(s2)
     {
         case 1: rc.s2 = UP; break;
-        case 2: rc.s2 = DOWN; break;
+        case 2: rc.s2 = DOWN; motor_stop();
         default: rc.s2 = MID; break;
     }
 }
